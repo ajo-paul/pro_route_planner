@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pro Delivery Route Optimizer | Enterprise Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        :root {
+            --brand-blue: #2563eb;
+            --brand-dark: #0f172a;
+        }
+
+        body { font-family: 'Inter', sans-serif; background: #f8f9fa; color: #1e293b; }
+        
+        #map { height: 100vh; width: 100vw; z-index: 1; background: #e2e8f0; }
+        
+        .sidebar { 
+            z-index: 1000; 
+            width: 400px; 
+            margin: 16px;
+            height: calc(100vh - 32px);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            background: white;
+            position: absolute;
+            left: 0;
+            top: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(-430px);
+        }
+
+        /* The toggle button now lives "on" the sidebar edge */
+        .toggle-sidebar-btn {
+            position: absolute;
+            right: -48px;
+            top: 24px;
+            width: 40px;
+            height: 40px;
+            background: white;
+            border-radius: 0 12px 12px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+            border: 1px solid #f1f5f9;
+            border-left: none;
+            cursor: pointer;
+            z-index: 1001;
+            transition: all 0.2s;
+        }
+        
+        .toggle-sidebar-btn:hover { background: #f8fafc; color: var(--brand-blue); }
+
+        /* RE-CENTER BUTTON ON MAP */
+        .map-fab {
+            position: absolute;
+            right: 24px;
+            bottom: 24px;
+            z-index: 500;
+            background: white;
+            padding: 12px 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #1e293b;
+            border: 1px solid #f1f5f9;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .map-fab:active { transform: scale(0.95); }
+        
+        /* FIX DROPDOWN VISIBILITY */
+        .autocomplete-list { 
+            position: absolute; 
+            top: 100%; 
+            left: 0; 
+            right: 0; 
+            background: white; 
+            z-index: 9999; /* Highest within parent */
+            border-radius: 12px;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+            border: 1px solid #e2e8f0;
+            margin-top: 8px;
+            max-height: 240px;
+            overflow-y: auto;
+        }
+
+        .marker-label {
+            background: var(--brand-blue);
+            border: 3px solid white;
+            border-radius: 12px;
+            width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: 800; color: white;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #cbd5e1; transition: .4s; border-radius: 20px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 14px; width: 14px;
+            left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--brand-blue); }
+        input:checked + .slider:before { transform: translateX(14px); }
+
+        .itinerary-step { position: relative; padding-left: 32px; }
+        .itinerary-step::before {
+            content: ''; position: absolute; left: 11px; top: 24px; bottom: -10px; width: 2px; background: #e2e8f0;
+        }
+        .itinerary-step:last-child::before { display: none; }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+
+        @media (max-width: 768px) {
+            .sidebar { width: calc(100% - 32px); height: 60vh; top: auto; bottom: 0; margin-bottom: 24px; }
+            .toggle-sidebar-btn { display: none; }
+        }
+    </style>
+</head>
+<body class="overflow-hidden bg-slate-100">
+
+    <!-- ONBOARDING MODAL -->
+    <div id="onboarding-modal" class="fixed inset-0 z-[10000] bg-slate-900/90 flex items-center justify-center p-4">
+        <div class="bg-white rounded-[40px] w-full max-w-lg overflow-hidden shadow-2xl">
+            <div id="slide-container" class="p-10 text-center min-h-[480px] flex flex-col justify-between"></div>
+            <div class="px-10 pb-10 flex justify-between items-center">
+                <div id="dots" class="flex gap-2"></div>
+                <button id="next-btn" onclick="nextSlide()" class="bg-blue-600 text-white px-10 py-4 rounded-2xl font-bold shadow-xl hover:bg-blue-700 transition">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAYWALL OVERLAY -->
+    <div id="paywall-overlay" class="hidden fixed inset-0 z-[11000] flex items-center justify-center p-4">
+        <div class="bg-white rounded-[48px] shadow-2xl p-12 max-w-md w-full text-center">
+            <div class="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-8">
+                <svg class="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            </div>
+            <h2 class="text-3xl font-black text-slate-900 mb-3">Trial Expired</h2>
+            <p class="text-slate-500 mb-10 leading-relaxed">Upgrade to Pro to unlock unlimited route optimizations and enterprise exports.</p>
+            <div class="space-y-4 mb-8">
+                <input id="license-key" type="text" placeholder="License Key" class="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-100 transition text-center font-mono">
+                <button onclick="activateKey()" class="w-full bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 shadow-lg">Activate License</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN SIDEBAR -->
+    <aside id="sidebar" class="sidebar">
+        <!-- Sidebar Toggle (Moves with sidebar) -->
+        <button onclick="toggleSidebar()" class="toggle-sidebar-btn" title="Toggle Sidebar">
+            <svg id="toggle-icon" class="w-5 h-5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+
+        <div class="p-6 border-b border-slate-100 bg-white rounded-t-[24px]">
+            <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-black text-slate-900 leading-tight">Pro Route <span class="text-blue-600">Planner</span></h1>
+                    <div id="trial-timer" class="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Trial: 05:00</div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 mb-6 px-1">
+                <label class="switch">
+                    <input type="checkbox" id="optimize-toggle" onchange="handleOptimizeToggle()">
+                    <span class="slider"></span>
+                </label>
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Route Optimization</span>
+            </div>
+
+            <div id="stops-container" class="space-y-3 max-h-52 overflow-y-auto pr-2 custom-scrollbar" style="overflow-x: visible;"></div>
+
+            <div class="mt-6 flex gap-3">
+                <button onclick="addStopInput()" class="flex-1 py-3 text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 flex items-center justify-center gap-2 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+                    Add Stop
+                </button>
+                <button onclick="calculateRoute()" class="flex-1 py-3 bg-blue-600 text-white rounded-xl text-xs font-extrabold hover:bg-blue-700 shadow-md">
+                    Calculate
+                </button>
+            </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-6 bg-slate-50/50 custom-scrollbar">
+            <div id="route-summary" class="hidden space-y-6">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                        <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Time</p>
+                        <h2 id="summary-duration" class="text-xl font-bold text-slate-900">--</h2>
+                    </div>
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                        <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Distance</p>
+                        <h2 id="summary-distance" class="text-xl font-bold text-slate-900">--</h2>
+                    </div>
+                </div>
+                <div id="itinerary" class="space-y-0"></div>
+                <button onclick="startNavigation()" class="w-full bg-slate-900 text-white py-4 rounded-xl flex items-center justify-center gap-2 font-bold hover:bg-black transition">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                    Open in Navigation
+                </button>
+            </div>
+            <div id="empty-state" class="text-center py-12 px-4">
+                <p class="text-slate-400 text-sm font-medium">Add destinations above to generate an optimized delivery sequence.</p>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAP AREA -->
+    <main id="map">
+        <button onclick="reCenterMap()" class="map-fab">
+            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            Re-center Map
+        </button>
+    </main>
+
+    <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-[10000] px-6 py-3 bg-slate-900 text-white rounded-full text-sm font-bold opacity-0 transition-opacity pointer-events-none">Message</div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const GEOAPIFY_KEY = 'b8568cb9afc64fad861a69edbddb2658';
+        const ADMIN_KEY = 'ADMIN-PRO-2024-XP'; 
+        
+        let map, routeLayer;
+        let stops = [{ text: '', coords: null }, { text: '', coords: null }]; 
+        let stopMarkers = [];
+        let sessionActive = true;
+        let trialSeconds = 300; 
+        let currentSlideIdx = 0;
+
+        const slides = [
+            {
+                title: "For Logistics Teams",
+                text: "Monitor your entire fleet's efficiency. Reduce planning time from hours to seconds with automated sequencing.",
+                icon: `<svg class="w-16 h-16 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>`
+            },
+            {
+                title: "For Delivery Drivers",
+                text: "Stop guessing the next turn. Get pixel-perfect routing with turn-by-turn logic pushed directly to your phone.",
+                icon: `<svg class="w-16 h-16 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>`
+            },
+            {
+                title: "For Small Business",
+                text: "Scale your local delivery service without expensive overhead. Optimize fuel costs and maximize daily drop-offs.",
+                icon: `<svg class="w-16 h-16 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>`
+            }
+        ];
+
+        function renderSlide() {
+            const container = document.getElementById('slide-container');
+            const dots = document.getElementById('dots');
+            const slide = slides[currentSlideIdx];
+            
+            container.innerHTML = `
+                <div class="slide-in flex flex-col items-center">
+                    <div class="mb-8 p-6 bg-slate-50 rounded-3xl">${slide.icon}</div>
+                    <h2 class="text-3xl font-black text-slate-900 mb-4">${slide.title}</h2>
+                    <p class="text-slate-500 leading-relaxed text-lg px-2">${slide.text}</p>
+                </div>
+            `;
+            dots.innerHTML = slides.map((_, i) => `
+                <div class="h-1.5 rounded-full transition-all duration-300 ${i === currentSlideIdx ? 'bg-blue-600 w-8' : 'bg-slate-200 w-3'}"></div>
+            `).join('');
+            document.getElementById('next-btn').innerText = currentSlideIdx === slides.length - 1 ? 'Start Planning' : 'Next';
+        }
+
+        function nextSlide() {
+            if (currentSlideIdx < slides.length - 1) {
+                currentSlideIdx++;
+                renderSlide();
+            } else {
+                document.getElementById('onboarding-modal').classList.add('hidden');
+                startTimer();
+            }
+        }
+
+        function startTimer() {
+            const timerEl = document.getElementById('trial-timer');
+            const interval = setInterval(() => {
+                if (!sessionActive) { clearInterval(interval); return; }
+                trialSeconds--;
+                const mins = Math.floor(trialSeconds / 60);
+                const secs = trialSeconds % 60;
+                timerEl.innerText = `Trial: ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                if (trialSeconds <= 0) {
+                    sessionActive = false;
+                    document.getElementById('paywall-overlay').classList.remove('hidden');
+                    clearInterval(interval);
+                }
+            }, 1000);
+        }
+
+        function activateKey() {
+            if (document.getElementById('license-key').value === ADMIN_KEY) {
+                sessionActive = true;
+                document.getElementById('paywall-overlay').classList.add('hidden');
+                document.getElementById('trial-timer').innerText = "PRO ACTIVE";
+                document.getElementById('trial-timer').className = "text-[10px] font-black text-blue-600 mt-0.5 tracking-widest";
+                showToast("Enterprise License Activated");
+            } else { showToast("Invalid License Key"); }
+        }
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([43.6532, -79.3832], 12);
+            L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+            }).addTo(map);
+            renderStops();
+            renderSlide();
+        }
+
+        function toggleSidebar() {
+            const sb = document.getElementById('sidebar');
+            const icon = document.getElementById('toggle-icon');
+            sb.classList.toggle('collapsed');
+            icon.style.transform = sb.classList.contains('collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
+        }
+
+        function reCenterMap() {
+            if (routeLayer) {
+                map.flyToBounds(routeLayer.getBounds(), { padding: [100, 100], duration: 1.5 });
+            } else if (stopMarkers.length > 0) {
+                const group = new L.featureGroup(stopMarkers);
+                map.flyToBounds(group.getBounds(), { padding: [100, 100], duration: 1.5 });
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.style.opacity = '1';
+            setTimeout(() => toast.style.opacity = '0', 3000);
+        }
+
+        function handleOptimizeToggle() {
+            if (document.getElementById('optimize-toggle').checked) {
+                showToast("Smart Optimization Active");
+                optimizeStops();
+            } else { calculateRoute(); }
+        }
+
+        function startNavigation() {
+            const valid = stops.filter(s => s.coords);
+            if (valid.length < 2) return;
+            const origin = `${valid[0].coords[1]},${valid[0].coords[0]}`;
+            const dest = `${valid[valid.length-1].coords[1]},${valid[valid.length-1].coords[0]}`;
+            const wpts = valid.slice(1, -1).map(s => `${s.coords[1]},${s.coords[0]}`).join('|');
+            window.open(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&waypoints=${wpts}&travelmode=driving`, '_blank');
+        }
+
+        function renderStops() {
+            const container = document.getElementById('stops-container');
+            container.innerHTML = '';
+            stops.forEach((stop, idx) => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center gap-3 relative';
+                div.style.overflow = 'visible';
+                div.innerHTML = `
+                    <div class="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-[10px] font-black text-slate-400">${String.fromCharCode(65 + idx)}</div>
+                    <div class="flex-1 relative" style="overflow: visible;">
+                        <input data-index="${idx}" type="text" placeholder="${idx === 0 ? 'Pickup Location' : 'Destination ' + idx}" 
+                            value="${stop.text}" class="w-full text-xs bg-white border border-slate-200 rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all font-semibold">
+                        <div id="autocomplete-${idx}" class="autocomplete-list hidden"></div>
+                    </div>
+                `;
+                container.appendChild(div);
+                bindAutocomplete(div.querySelector('input'), idx);
+            });
+        }
+
+        function addStopInput() {
+            if (!sessionActive) return;
+            stops.push({ text: '', coords: null });
+            renderStops();
+        }
+
+        function bindAutocomplete(input, index) {
+            const list = document.getElementById(`autocomplete-${index}`);
+            input.addEventListener('input', (e) => {
+                if (!sessionActive) return;
+                const val = e.target.value;
+                stops[index].text = val;
+                if (val.length < 3) { list.classList.add('hidden'); return; }
+                clearTimeout(input.timer);
+                input.timer = setTimeout(async () => {
+                    const res = await fetch(`https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(val)}&apiKey=${GEOAPIFY_KEY}&limit=5`);
+                    const data = await res.json();
+                    list.innerHTML = '';
+                    if (!data.features) return;
+                    data.features.forEach(f => {
+                        const item = document.createElement('div');
+                        item.className = 'px-4 py-3 hover:bg-blue-50 cursor-pointer text-xs border-b border-slate-50';
+                        item.innerHTML = `<p class="font-bold text-slate-900">${f.properties.name || f.properties.street}</p><p class="text-slate-500 truncate text-[10px]">${f.properties.formatted}</p>`;
+                        item.onclick = () => {
+                            stops[index] = { text: f.properties.formatted, coords: f.geometry.coordinates };
+                            input.value = f.properties.formatted;
+                            list.classList.add('hidden');
+                            updateMapDisplay();
+                            if (document.getElementById('optimize-toggle').checked) optimizeStops();
+                        };
+                        list.appendChild(item);
+                    });
+                    list.classList.remove('hidden');
+                }, 350);
+            });
+        }
+
+        async function calculateRoute() {
+            if (!sessionActive) return;
+            const valid = stops.filter(s => s.coords);
+            if (valid.length < 2) return;
+            const waypoints = valid.map(s => `${s.coords[1]},${s.coords[0]}`).join('|');
+            const res = await fetch(`https://api.geoapify.com/v1/routing?waypoints=${waypoints}&mode=drive&apiKey=${GEOAPIFY_KEY}`);
+            const data = await res.json();
+            if (data.features) displayRoute(data.features[0]);
+        }
+
+        function displayRoute(route) {
+            if (routeLayer) map.removeLayer(routeLayer);
+            routeLayer = L.geoJSON(route, { style: { color: '#2563eb', weight: 6, opacity: 0.8 } }).addTo(map);
+            updateMarkers();
+            reCenterMap();
+            
+            const props = route.properties;
+            document.getElementById('route-summary').classList.remove('hidden');
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('summary-duration').innerText = Math.round(props.time / 60) + 'm';
+            document.getElementById('summary-distance').innerText = (props.distance / 1000).toFixed(1) + 'km';
+            
+            const itinerary = document.getElementById('itinerary');
+            itinerary.innerHTML = '<h4 class="text-[10px] font-black uppercase text-slate-400 mb-4 tracking-widest">Planned Sequence</h4>';
+            
+            const legs = route.properties.legs || [];
+            stops.forEach((s, i) => {
+                if (!s.coords) return;
+                const step = document.createElement('div');
+                step.className = 'itinerary-step group cursor-pointer';
+                step.onclick = () => previewStop(s.coords);
+                
+                const legInfo = (i > 0 && legs[i-1]) ? 
+                    `<p class="text-[10px] font-bold text-blue-600 mb-1">Travel: ${Math.round(legs[i-1].time / 60)}m</p>` : '';
+
+                step.innerHTML = `
+                    ${legInfo}
+                    <div class="flex gap-4 mb-8">
+                        <div class="w-6 h-6 rounded-lg bg-slate-900 text-white text-[10px] flex items-center justify-center font-black group-hover:scale-110 transition shadow-sm">${String.fromCharCode(65 + i)}</div>
+                        <div class="flex-1">
+                            <p class="text-xs font-bold text-slate-900 leading-tight">${s.text}</p>
+                            <p class="text-[9px] text-slate-400 mt-1">Arrival: +${i === 0 ? '0' : Math.round(legs.slice(0, i).reduce((a, b) => a + b.time, 0) / 60)} mins</p>
+                        </div>
+                    </div>
+                `;
+                itinerary.appendChild(step);
+            });
+        }
+
+        function previewStop(coords) {
+            map.flyTo([coords[1], coords[0]], 17, { duration: 1.2, easeLinearity: 0.25 });
+        }
+
+        function updateMarkers() {
+            stopMarkers.forEach(m => map.removeLayer(m));
+            stopMarkers = [];
+            stops.forEach((s, i) => {
+                if (s.coords) {
+                    const icon = L.divIcon({
+                        className: 'custom-icon',
+                        html: `<div class="marker-label">${String.fromCharCode(65 + i)}</div>`,
+                        iconSize: [32, 32], iconAnchor: [16, 32]
+                    });
+                    const m = L.marker([s.coords[1], s.coords[0]], { icon }).addTo(map);
+                    m.on('click', () => previewStop(s.coords));
+                    stopMarkers.push(m);
+                }
+            });
+        }
+
+        function updateMapDisplay() {
+            updateMarkers();
+            if (stops.filter(s => s.coords).length > 0) reCenterMap();
+        }
+
+        function optimizeStops() {
+            const valid = stops.filter(s => s.coords);
+            if (valid.length < 3) { calculateRoute(); return; }
+            const start = valid[0];
+            let pool = valid.slice(1);
+            const opt = [start];
+            let curr = start;
+            while (pool.length > 0) {
+                let near = -1, dist = Infinity;
+                pool.forEach((p, idx) => {
+                    const d = Math.sqrt(Math.pow(curr.coords[0]-p.coords[0],2) + Math.pow(curr.coords[1]-p.coords[1],2));
+                    if (d < dist) { dist = d; near = idx; }
+                });
+                curr = pool[near];
+                opt.push(curr);
+                pool.splice(near, 1);
+            }
+            stops = [...opt, ...stops.filter(s => !s.coords)];
+            renderStops();
+            calculateRoute();
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
