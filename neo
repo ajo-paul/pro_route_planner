@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neo-Brutalist Street Map</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Public+Sans:wght@700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --neo-green: #2AF598;
+            --neo-pink: #FF6AC1;
+            --neo-cyan: #37E2D5;
+            --neo-blue: #5D5FEF;
+            --neo-yellow: #F4E04D;
+            --black: #000000;
+            --white: #FFFFFF;
+            --border-width: 6px;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background-color: var(--black);
+            font-family: 'Public Sans', sans-serif;
+            overflow: hidden;
+        }
+
+        #map-outer {
+            position: relative;
+            width: 96vw;
+            height: 90vh;
+            margin: 2vh auto;
+            border: var(--border-width) solid var(--black);
+            box-shadow: 15px 15px 0px var(--neo-cyan);
+            background: var(--white);
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            background: var(--white) !important;
+        }
+
+        .brutalist-canvas {
+            filter: url(#brutalist-stable-color);
+        }
+
+        /* Routing UI */
+        .routing-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 2000;
+            width: 320px;
+            background: var(--white);
+            border: var(--border-width) solid var(--black);
+            box-shadow: 10px 10px 0px var(--black);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-height: 80vh;
+            overflow-y: visible; /* Changed to allow dropdowns to pop out */
+        }
+
+        .routing-panel h2 {
+            margin: 0;
+            font-family: 'Archivo Black', sans-serif;
+            text-transform: uppercase;
+            font-size: 1.2rem;
+            background: var(--neo-yellow);
+            padding: 10px;
+            border-bottom: var(--border-width) solid var(--black);
+            margin: -20px -20px 10px -20px;
+            text-align: center;
+        }
+
+        .input-group {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .input-group label {
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            font-weight: 900;
+        }
+
+        input {
+            border: 3px solid var(--black);
+            padding: 10px;
+            font-family: inherit;
+            font-weight: 700;
+            outline: none;
+            background: white;
+            width: calc(100% - 26px);
+        }
+
+        .autocomplete-items {
+            position: absolute;
+            border: 3px solid var(--black);
+            z-index: 2100;
+            top: 100%; /* Position right under input */
+            left: 0;
+            right: 0;
+            background: white;
+            max-height: 200px;
+            overflow-y: auto;
+            box-shadow: 8px 8px 0px var(--black);
+            margin-top: 2px;
+            display: none; /* Hidden by default */
+        }
+
+        .autocomplete-items div {
+            padding: 12px;
+            cursor: pointer;
+            border-bottom: 2px solid var(--black);
+            font-size: 0.8rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .autocomplete-items div:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-items div:hover { 
+            background-color: var(--neo-green); 
+        }
+
+        .btn-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        button {
+            border: 4px solid var(--black);
+            padding: 12px;
+            font-family: 'Archivo Black', sans-serif;
+            text-transform: uppercase;
+            cursor: pointer;
+            box-shadow: 4px 4px 0px var(--black);
+            transition: all 0.1s;
+            font-size: 0.8rem;
+        }
+
+        button:active {
+            transform: translate(2px, 2px);
+            box-shadow: 1px 1px 0px var(--black);
+        }
+
+        #get-route { background: var(--neo-pink); grid-column: span 2; }
+        #preview-route { background: var(--neo-cyan); display: none; }
+        #recenter-map { background: var(--neo-green); }
+
+        .trip-details {
+            margin-top: 5px;
+            padding: 10px;
+            background: var(--neo-yellow);
+            border: 3px solid var(--black);
+            font-size: 0.8rem;
+            font-weight: 900;
+            display: none;
+        }
+
+        .nav-arrow-container {
+            transition: transform 0.2s linear;
+        }
+
+        .texture-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 1000; opacity: 0.08;
+            background-image: radial-gradient(var(--black) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <svg style="position: absolute; width: 0; height: 0;">
+      <filter id="brutalist-stable-color" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 1 0" />
+        <feComponentTransfer>
+          <feFuncR type="table" tableValues="0.36 0.36 1.0 1.0 0.16 0.16 0.0" />
+          <feFuncG type="table" tableValues="0.37 0.37 0.41 0.41 0.96 0.96 0.0" />
+          <feFuncB type="table" tableValues="0.93 0.93 0.75 0.75 0.59 0.59 0.0" />
+        </feComponentTransfer>
+        <feContrast contrast="1.5" />
+      </filter>
+    </svg>
+
+    <div id="map-outer">
+        <div class="texture-overlay"></div>
+        <div class="routing-panel" id="ui-panel">
+            <h2>Navigation</h2>
+            <div class="input-group">
+                <label>From</label>
+                <input type="text" id="start-input" placeholder="Type origin..." autocomplete="off">
+                <div id="start-autocomplete" class="autocomplete-items"></div>
+            </div>
+            <div class="input-group">
+                <label>To</label>
+                <input type="text" id="dest-input" placeholder="Type destination..." autocomplete="off">
+                <div id="dest-autocomplete" class="autocomplete-items"></div>
+            </div>
+            <div class="btn-container">
+                <button id="get-route">Find Path</button>
+                <button id="preview-route">Preview</button>
+                <button id="recenter-map">Recenter</button>
+            </div>
+            <div id="trip-details" class="trip-details"></div>
+        </div>
+
+        <div id="map"></div>
+    </div>
+
+    <script>
+        const GEOAPIFY_KEY = 'b8568cb9afc64fad861a69edbddb2658';
+        
+        // RESTRICTED ZOOM: 12 (wide city) to 19 (street detail)
+        const map = L.map('map', {
+            zoomControl: false,
+            attributionControl: false,
+            zoomAnimation: true,
+            markerZoomAnimation: true,
+            fadeAnimation: true,
+            minZoom: 12,
+            maxZoom: 19
+        }).setView([43.6532, -79.3832], 15);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            className: 'brutalist-canvas',
+            updateWhenIdle: false,
+            updateWhenZooming: true,
+            keepBuffer: 8
+        }).addTo(map);
+
+        let routeLayerGroup = L.layerGroup().addTo(map);
+        let startMarker, endMarker, navMarker;
+        let currentRouteCoords = [];
+        let isPreviewing = false;
+
+        const createIcon = (color) => L.divIcon({
+            className: '',
+            html: `<div style="width:20px; height:20px; background:${color}; border:4px solid black; box-shadow:4px 4px 0px black;"></div>`,
+            iconSize: [20, 20]
+        });
+
+        const createNavIcon = (rotation = 0) => L.divIcon({
+            className: 'nav-arrow-container',
+            html: `<div style="transform: rotate(${rotation}deg);">
+                    <svg width="40" height="40" viewBox="0 0 30 30" style="filter: drop-shadow(4px 4px 0px black);">
+                        <path d="M15 2 L26 25 L15 20 L4 25 Z" fill="white" stroke="var(--neo-blue)" stroke-width="4"/>
+                    </svg>
+                   </div>`,
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+        });
+
+        function intelligentFly(boundsOrLatLng, isBounds = true) {
+            const panelWidth = document.getElementById('ui-panel').offsetWidth + 40;
+            const options = {
+                paddingTopLeft: [40, 40],
+                paddingBottomRight: [panelWidth, 40],
+                duration: 1.5
+            };
+            if (isBounds) map.flyToBounds(boundsOrLatLng, options);
+            else map.flyTo(boundsOrLatLng, 15, options);
+        }
+
+        function setupAutocomplete(inputId, listId, isStart) {
+            const input = document.getElementById(inputId);
+            const list = document.getElementById(listId);
+            let timeout = null;
+
+            input.addEventListener('input', () => {
+                clearTimeout(timeout);
+                const value = input.value;
+                if (!value || value.length < 3) { 
+                    list.innerHTML = ''; 
+                    list.style.display = 'none';
+                    return; 
+                }
+                timeout = setTimeout(async () => {
+                    try {
+                        const response = await fetch(`https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(value)}&apiKey=${GEOAPIFY_KEY}`);
+                        const data = await response.json();
+                        list.innerHTML = '';
+                        
+                        if (data.features.length > 0) {
+                            list.style.display = 'block';
+                            data.features.forEach(feature => {
+                                const item = document.createElement('div');
+                                item.innerHTML = feature.properties.formatted;
+                                item.addEventListener('click', () => {
+                                    input.value = feature.properties.formatted;
+                                    list.innerHTML = '';
+                                    list.style.display = 'none';
+                                    const coords = feature.geometry.coordinates;
+                                    const latLng = [coords[1], coords[0]];
+                                    if (isStart) {
+                                        if (startMarker) map.removeLayer(startMarker);
+                                        startMarker = L.marker(latLng, {icon: createIcon('var(--neo-yellow)')}).addTo(map);
+                                    } else {
+                                        if (endMarker) map.removeLayer(endMarker);
+                                        endMarker = L.marker(latLng, {icon: createIcon('var(--neo-yellow)')}).addTo(map);
+                                    }
+                                    resetPreview();
+                                    intelligentFly(latLng, false);
+                                });
+                                list.appendChild(item);
+                            });
+                        } else {
+                            list.style.display = 'none';
+                        }
+                    } catch (e) { console.error(e); }
+                }, 300);
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!input.contains(e.target) && !list.contains(e.target)) {
+                    list.style.display = 'none';
+                }
+            });
+        }
+
+        setupAutocomplete('start-input', 'start-autocomplete', true);
+        setupAutocomplete('dest-input', 'dest-autocomplete', false);
+
+        async function getRoute() {
+            const startInput = document.getElementById('start-input').value;
+            const destInput = document.getElementById('dest-input').value;
+            if (!startInput || !destInput) return;
+
+            const btn = document.getElementById('get-route');
+            btn.innerText = "Finding...";
+            
+            try {
+                const sRes = await fetch(`https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(startInput)}&apiKey=${GEOAPIFY_KEY}`);
+                const sData = await sRes.json();
+                const dRes = await fetch(`https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(destInput)}&apiKey=${GEOAPIFY_KEY}`);
+                const dData = await dRes.json();
+
+                if (!sData.features.length || !dData.features.length) throw new Error("Location not found");
+
+                const s = sData.features[0].geometry.coordinates;
+                const d = dData.features[0].geometry.coordinates;
+
+                const rRes = await fetch(`https://api.geoapify.com/v1/routing?waypoints=${s[1]},${s[0]}|${d[1]},${d[0]}&mode=drive&apiKey=${GEOAPIFY_KEY}`);
+                const rData = await rRes.json();
+                const routeFeature = rData.features[0];
+                
+                currentRouteCoords = routeFeature.geometry.coordinates[0];
+
+                routeLayerGroup.clearLayers();
+                L.geoJSON(routeFeature, { style: { color: "#000", weight: 14 } }).addTo(routeLayerGroup);
+                const mainLine = L.geoJSON(routeFeature, { style: { color: "#FF6AC1", weight: 6 } }).addTo(routeLayerGroup);
+                
+                document.getElementById('trip-details').style.display = 'block';
+                document.getElementById('trip-details').innerHTML = `PATH LOCKED<br>${(routeFeature.properties.distance/1000).toFixed(1)}KM / ${Math.round(routeFeature.properties.time/60)}MIN`;
+                document.getElementById('preview-route').style.display = 'block';
+
+                intelligentFly(mainLine.getBounds(), true);
+            } catch (err) { 
+                console.error(err);
+                btn.innerText = "Error: Not Found";
+                setTimeout(() => btn.innerText = "Find Path", 2000);
+            }
+            finally { if(btn.innerText === "Finding...") btn.innerText = "Find Path"; }
+        }
+
+        function calculateHeading(p1, p2) {
+            const dy = p2[1] - p1[1];
+            const dx = p2[0] - p1[0];
+            return Math.atan2(dx, dy) * (180 / Math.PI);
+        }
+
+        function lerp(start, end, amt) {
+            return start + (end - start) * amt;
+        }
+
+        async function startPreview() {
+            if (isPreviewing || currentRouteCoords.length < 2) return;
+            isPreviewing = true;
+            
+            if (navMarker) map.removeLayer(navMarker);
+            
+            const initialHeading = calculateHeading(currentRouteCoords[0], currentRouteCoords[1]);
+            navMarker = L.marker([currentRouteCoords[0][1], currentRouteCoords[0][0]], {
+                icon: createNavIcon(initialHeading)
+            }).addTo(map);
+
+            const travelDurationPerSegment = 800; 
+            const fps = 60;
+            const frameTime = 1000 / fps;
+
+            for (let i = 0; i < currentRouteCoords.length - 1; i++) {
+                if (!isPreviewing) break;
+                
+                const pStart = currentRouteCoords[i];
+                const pEnd = currentRouteCoords[i+1];
+                const heading = calculateHeading(pStart, pEnd);
+                
+                navMarker.setIcon(createNavIcon(heading));
+
+                const steps = travelDurationPerSegment / frameTime;
+                
+                for (let s = 0; s <= steps; s++) {
+                    if (!isPreviewing) break;
+                    const progress = s / steps;
+                    const lat = lerp(pStart[1], pEnd[1], progress);
+                    const lng = lerp(pStart[0], pEnd[0], progress);
+                    
+                    const currentLatLng = [lat, lng];
+                    navMarker.setLatLng(currentLatLng);
+                    map.setView(currentLatLng, 18, { animate: false });
+
+                    await new Promise(r => setTimeout(r, frameTime));
+                }
+            }
+            stopPreview();
+        }
+
+        function stopPreview() {
+            isPreviewing = false;
+            if (navMarker) map.removeLayer(navMarker);
+        }
+
+        function resetPreview() {
+            stopPreview();
+            routeLayerGroup.clearLayers();
+            document.getElementById('preview-route').style.display = 'none';
+            document.getElementById('trip-details').style.display = 'none';
+        }
+
+        document.getElementById('get-route').addEventListener('click', getRoute);
+        document.getElementById('preview-route').addEventListener('click', startPreview);
+        document.getElementById('recenter-map').addEventListener('click', () => {
+            stopPreview();
+            setTimeout(() => {
+                if (routeLayerGroup.getLayers().length > 0) {
+                    intelligentFly(L.featureGroup(routeLayerGroup.getLayers()).getBounds(), true);
+                } else {
+                    map.flyTo([43.6532, -79.3832], 15);
+                }
+            }, 100);
+        });
+
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+    </script>
+</body>
+</html>
